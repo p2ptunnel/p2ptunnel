@@ -7,6 +7,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/p2ptunnel/p2ptunnel/pkg/httplogger"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"io"
@@ -16,30 +17,43 @@ import (
 	"time"
 )
 
+var (
+	agentName string
+	agentID   peer.ID
+)
+
 func connector(ctx *cli.Context) error {
 	conf, err := readConf(ctx.GlobalString("conf"))
 	if err != nil {
 		return err
 	}
 
+	verbose = ctx.GlobalBool("verbose")
+	if verbose {
+		logger = httplogger.New(nil)
+	}
+
+	// TODO: support multiple peers.
+	// Need determine how to distinguish the target peers.
+	// option 1: use customized http header such as X-PEER: <peer ID>. Need define a default peer in case of absence.
+	// option 2: add peer Id in url, such as curl localhost:8004/<peer ID>/<target path>
 	switch len(conf.Peers) {
 	case 0:
 		return errors.New("Remote agent ID is not found, please add firstly")
 	case 1:
 	default:
-		return errors.New("Multiple agents are added. Only support 1 for now")
+		return errors.New("Only support connecting to 1 agent for now")
 	}
 
-	// Setup reverse lookup hash map for authentication.
-	revLookup = make(map[string]string, len(conf.Peers))
-	// Setup Peer Table for Quick Packet --> Dest ID lookup
 	peerTable := make(map[string]peer.ID)
 	for name, p := range conf.Peers {
-		revLookup[p.ID] = name
-		peerTable[name], err = peer.Decode(p.ID)
+		agentName = name
+		agentID, err = peer.Decode(p.ID)
 		if err != nil {
 			return err
 		}
+		peerTable[agentName] = agentID
+		break
 	}
 
 	// Setup System Context
@@ -103,11 +117,11 @@ func connector(ctx *cli.Context) error {
 				if err != nil {
 					fmt.Println(err)
 				}
-				body := make([]byte, 2)
-				binary.LittleEndian.PutUint16(body, uint16(size))
-				body = append(body, buf[:size]...)
+				//body := make([]byte, 2)
+				//binary.LittleEndian.PutUint16(body, uint16(size))
+				//body = append(body, buf[:size]...)
 
-				err = sendToRemote(ctx, host, peerTable, body, c)
+				err = sendToRemote(ctx, host, peerTable, buf[:size], c)
 				if err != nil {
 					fmt.Println(err)
 				}
@@ -138,6 +152,12 @@ retry:
 			}
 		}
 		fmt.Printf("[+] Connection to %s Successful. Network Ready.\n", name)
+		if verbose {
+			logger.Reset()
+			fmt.Println("--->")
+			logger.Print(body)
+		}
+
 		l, err := stream.Write(body)
 		if err != nil {
 			return err
@@ -145,16 +165,6 @@ retry:
 		if l <= 0 {
 			fmt.Printf("write wrong size payload: %d\n", l)
 		}
-
-		/*
-			var requestSize = make([]byte, 2)
-			// Read the incoming packet's size as a binary value.
-			_, err = stream.Read(requestSize)
-			if err != nil {
-				stream.Close()
-				return errors.Wrapf(err, "read reply")
-			}
-		*/
 
 		// Decode the incoming packet's size from binary.
 		//size := binary.LittleEndian.Uint16(requestSize)
@@ -168,7 +178,12 @@ retry:
 		if r == 0 {
 			return errors.Errorf("read empty data")
 		}
-		fmt.Printf("read reply %d: %s\n", r, string(reply))
+		if verbose {
+			logger.Reset()
+			fmt.Println("<---")
+			logger.Print(reply)
+		}
+
 		w, err := local.Write(reply)
 		if err != nil {
 			return err
@@ -216,6 +231,7 @@ func streamHandlerConnector(stream network.Stream) {
 				return
 			}
 		}
+
 		fmt.Printf("read %d from %s: %s\n", size, stream.ID(), string(packet[:size]))
 	}
 }

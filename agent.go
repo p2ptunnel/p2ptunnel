@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/p2ptunnel/p2ptunnel/pkg/httplogger"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
+	"io"
 	"net"
 	"strconv"
 )
@@ -15,7 +16,6 @@ import (
 var (
 	revLookup   map[string]string
 	forwardPort int
-	forwardBuf  []byte
 )
 
 func agent(ctx *cli.Context) error {
@@ -27,7 +27,11 @@ func agent(ctx *cli.Context) error {
 		return errors.New("Please provide forwarding port number")
 	}
 
-	forwardBuf = make([]byte, 1000000)
+	verbose = ctx.GlobalBool("verbose")
+	if verbose {
+		logger = httplogger.New(nil)
+	}
+
 	forwardPort, err = strconv.Atoi(ctx.Args()[0])
 	if err != nil {
 		return err
@@ -77,32 +81,20 @@ func streamHandlerAgent(stream network.Stream) {
 		stream.Reset()
 		return
 	}
-	var requestSize = make([]byte, 2)
-	// Read the incoming packet's size as a binary value.
-	_, err := stream.Read(requestSize)
-	if err != nil {
-		stream.Close()
-		return
-	}
-
-	// Decode the incoming packet's size from binary.
-	size := binary.LittleEndian.Uint16(requestSize)
-
-	//fmt.Printf("got %d byte, length: %d\n", requestSize, size)
-
-	// Read in the packet until completion.
-	var request = make([]byte, size)
-	var plen uint16 = 0
-	for plen < size {
-		tmp, err := stream.Read(request[plen:size])
-		plen += uint16(tmp)
+	/*
+		var requestSize = make([]byte, 2)
+		// Read the incoming packet's size as a binary value.
+		_, err := stream.Read(requestSize)
 		if err != nil {
 			stream.Close()
-			fmt.Printf("read error: %v", err)
 			return
 		}
-		//fmt.Printf("read %d byte, %s\n", tmp, string(request))
-	}
+
+		// Decode the incoming packet's size from binary.
+		size := binary.LittleEndian.Uint16(requestSize)
+	*/
+
+	// TODO: use persistent connection
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", "localhost:"+strconv.Itoa(forwardPort))
 	if err != nil {
 		fmt.Printf("resolve local service tcp:%d : %s", forwardPort, err)
@@ -113,43 +105,86 @@ func streamHandlerAgent(stream network.Stream) {
 		fmt.Println(err)
 		return
 	}
-	l, err := conn.Write(request[:size])
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	if l != int(size) {
-		fmt.Printf("forward expect write %d bytes, actually %d bytes\n", size, l)
-		return
+
+	defer func() {
+		stream.Write(nil)
+		if err = conn.Close(); err != nil {
+			fmt.Printf("close forwarding connection got: %v\n", err)
+		}
+	}()
+
+	//fmt.Printf("got %d byte, length: %d\n", requestSize, size)
+
+	// Read in the packet until completion.
+	var buffer = make([]byte, 1024)
+	defer func() {
+		// free memory explicitly
+		buffer = nil
+	}()
+
+	if verbose {
+		logger.Reset()
+		fmt.Println("--->")
 	}
 
 	for {
-		rl, err := conn.Read(forwardBuf)
+		readSize, err := stream.Read(buffer)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("(EOF)")
+				return
+			}
+			stream.Close()
+			fmt.Printf("read error: %v", err)
+			return
+		}
+
+		if verbose {
+			logger.Print(buffer)
+		}
+
+		writeSize, err := conn.Write(buffer[:readSize])
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		if rl == 0 {
-			fmt.Println("reach EOF")
-			break
-		}
-		fmt.Printf("read feedback %s\n", string(forwardBuf[:rl]))
-		wl, err := stream.Write(forwardBuf[:rl])
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-		if wl != rl {
-			fmt.Printf("reply expect write %d bytes, actually %d bytes\n", l, wl)
+		if writeSize != readSize {
+			fmt.Printf("forward expect write %d bytes, actually %d bytes\n", readSize, writeSize)
 			return
 		}
-		if rl < len(forwardBuf) {
-			// reach end
+
+		if readSize < 1024 {
 			break
 		}
 	}
-	stream.Write(nil)
-	if err = conn.Close(); err != nil {
-		fmt.Printf("close forwarding connection got: %v\n", err)
+
+	if verbose {
+		logger.Reset()
+		fmt.Println("<---")
+	}
+
+	readSize := 0
+	for readSize < len(buffer) {
+		readSize, err = conn.Read(buffer)
+		if err != nil {
+			fmt.Printf("failed to read reply: %s\n", err)
+			return
+		}
+		if readSize == 0 {
+			fmt.Println("reach EOF of read reply")
+			break
+		}
+		if verbose {
+			logger.Print(buffer[:readSize])
+		}
+		writeSize, err := stream.Write(buffer[:readSize])
+		if err != nil {
+			fmt.Printf("failed to write reply to peer: %s\n", err)
+			return
+		}
+		if writeSize != readSize {
+			fmt.Printf("reply expect write %d bytes, actually %d bytes\n", readSize, writeSize)
+			return
+		}
 	}
 }

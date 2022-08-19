@@ -15,6 +15,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -41,7 +42,7 @@ type Peer struct {
 }
 
 func readConf(configFile string) (*Config, error) {
-	data, err := os.ReadFile(configFile)
+	data, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/p2ptunnel/p2ptunnel/pkg/httplogger"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"gopkg.in/yaml.v2"
@@ -20,6 +21,11 @@ const (
 	defaultConnectorPort = 8012
 )
 
+var (
+	verbose bool
+	logger  *httplogger.HTTPLogger
+)
+
 func main() {
 	app := cli.NewApp()
 
@@ -30,6 +36,10 @@ func main() {
 			Name:  "conf, c",
 			Usage: "config file path",
 			Value: defaultConf,
+		},
+		cli.BoolFlag{
+			Name:  "verbose, v",
+			Usage: "print more debug message",
 		},
 	}
 	app.Commands = []cli.Command{
