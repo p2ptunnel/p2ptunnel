@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -58,6 +59,7 @@ func connector(ctx *cli.Context) error {
 
 	// Setup System Context
 	cctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	fmt.Println("[+] Creating LibP2P Node")
 
@@ -130,8 +132,6 @@ func connector(ctx *cli.Context) error {
 			}(cctx, conn)
 		}
 	}
-
-	return nil
 }
 
 func sendToRemote(ctx context.Context, node host.Host, peerTable map[string]peer.ID, body []byte, local io.Writer) error {
@@ -205,7 +205,9 @@ retry:
 func streamHandlerConnector(stream network.Stream) {
 	// If the remote node ID isn't in the list of known nodes don't respond.
 	if _, ok := revLookup[stream.Conn().RemotePeer().Pretty()]; !ok {
-		stream.Reset()
+		if err := stream.Reset(); err != nil {
+			log.Printf("while lookup: %v\n", err)
+		}
 		return
 	}
 	var packet = make([]byte, 1000000)

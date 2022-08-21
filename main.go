@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	defaultConf          = "./conf/p2ptunnel.yml"
-	defaultAgentPort     = 8011
+	defaultConf = "./conf/p2ptunnel.yml"
+	//defaultAgentPort     = 8011
 	defaultConnectorPort = 8012
 )
 
@@ -183,6 +183,9 @@ func removePeer(ctx *cli.Context) error {
 
 	configFile := ctx.GlobalString("conf")
 	conf, err := readConf(configFile)
+	if err != nil {
+		return err
+	}
 
 	p, ok := conf.Peers[ctx.Args()[0]]
 	if !ok {

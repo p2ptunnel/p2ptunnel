@@ -168,7 +168,6 @@ func Discover(ctx context.Context, h host.Host, dht *dht.IpfsDHT, peerTable map[
 			}
 		}
 	}
-	fmt.Println("[+] Network Setup Complete...Waiting on Node Discovery")
 }
 
 func prettyDiscovery(ctx context.Context, node host.Host, peerTable map[string]peer.ID) {

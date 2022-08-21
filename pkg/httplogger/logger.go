@@ -6,11 +6,6 @@ import (
 	"os"
 )
 
-const (
-	cr = byte('\r') // byte value: 0x0d
-	lf = byte('\n') // byte value: 0x0a
-)
-
 type curState byte
 
 const (

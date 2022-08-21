@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"io"
+	"log"
 	"net"
 	"strconv"
 )
@@ -51,6 +52,7 @@ func agent(ctx *cli.Context) error {
 
 	// Setup System Context
 	cctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	fmt.Println("[+] Creating LibP2P Node")
 
@@ -78,7 +80,9 @@ func streamHandlerAgent(stream network.Stream) {
 	fmt.Printf("stream handle: %s from %+v\n", stream.Conn().RemotePeer().Pretty(), revLookup)
 	if _, ok := revLookup[stream.Conn().RemotePeer().Pretty()]; !ok {
 		fmt.Println("not found, need reset")
-		stream.Reset()
+		if err := stream.Reset(); err != nil {
+			log.Printf("while reset stream: %v", err)
+		}
 		return
 	}
 	/*
@@ -107,7 +111,6 @@ func streamHandlerAgent(stream network.Stream) {
 	}
 
 	defer func() {
-		stream.Write(nil)
 		if err = conn.Close(); err != nil {
 			fmt.Printf("close forwarding connection got: %v\n", err)
 		}
@@ -167,11 +170,15 @@ func streamHandlerAgent(stream network.Stream) {
 	for readSize < len(buffer) {
 		readSize, err = conn.Read(buffer)
 		if err != nil {
-			fmt.Printf("failed to read reply: %s\n", err)
+			if err == io.EOF {
+				fmt.Println("reach EOF of read reply")
+			} else {
+				fmt.Printf("failed to read reply: %s\n", err)
+			}
 			return
 		}
 		if readSize == 0 {
-			fmt.Println("reach EOF of read reply")
+			fmt.Println("read empty data")
 			break
 		}
 		if verbose {
